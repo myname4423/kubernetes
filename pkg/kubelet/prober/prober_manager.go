@@ -89,6 +89,7 @@ type Manager interface {
 	UpdatePodStatus(*v1.Pod, *v1.PodStatus)
 }
 
+// manger中包含了很多Manager，它们来自results.Manager和status.Manager
 type manager struct {
 	// Map of active workers for probes
 	workers map[probeKey]*worker
@@ -178,6 +179,7 @@ func getRestartableInitContainers(pod *v1.Pod) []v1.Container {
 	return restartableInitContainers
 }
 
+// manager负责管理一堆workers，根据probkey进行索引
 func (m *manager) AddPod(pod *v1.Pod) {
 	m.workerLock.Lock()
 	defer m.workerLock.Unlock()
@@ -185,9 +187,9 @@ func (m *manager) AddPod(pod *v1.Pod) {
 	key := probeKey{podUID: pod.UID}
 	for _, c := range append(pod.Spec.Containers, getRestartableInitContainers(pod)...) {
 		key.containerName = c.Name
-
+		//REVIEW - 根据Pod的spec中的生命来创建
 		if c.StartupProbe != nil {
-			key.probeType = startup
+			key.probeType = startup //probekey的三个元素全部组装好了
 			if _, ok := m.workers[key]; ok {
 				klog.V(8).ErrorS(nil, "Startup probe already exists for container",
 					"pod", klog.KObj(pod), "containerName", c.Name)
@@ -195,7 +197,7 @@ func (m *manager) AddPod(pod *v1.Pod) {
 			}
 			w := newWorker(m, startup, pod, c)
 			m.workers[key] = w
-			go w.run()
+			go w.run() //分配好一个worker开启一个goroutine
 		}
 
 		if c.ReadinessProbe != nil {
@@ -224,6 +226,7 @@ func (m *manager) AddPod(pod *v1.Pod) {
 	}
 }
 
+// 先关闭 pod 的 liveness 和 startup 探针，然后给 pod 发送 SIGTERM 信号，超时未退出则强制 SIGKILL 杀掉容器.
 func (m *manager) StopLivenessAndStartup(pod *v1.Pod) {
 	m.workerLock.RLock()
 	defer m.workerLock.RUnlock()
@@ -234,12 +237,14 @@ func (m *manager) StopLivenessAndStartup(pod *v1.Pod) {
 		for _, probeType := range [...]probeType{liveness, startup} {
 			key.probeType = probeType
 			if worker, ok := m.workers[key]; ok {
-				worker.stop()
+				worker.stop() //worker可以直接stop
 			}
 		}
 	}
 }
 
+// LINK - pkg/kubelet/kubelet.go
+// 最后删除该 pod 所有类型的探针
 func (m *manager) RemovePod(pod *v1.Pod) {
 	m.workerLock.RLock()
 	defer m.workerLock.RUnlock()
@@ -256,17 +261,19 @@ func (m *manager) RemovePod(pod *v1.Pod) {
 	}
 }
 
+// kubelet 周期性执行 HandlePodCleanups 方法, 该方法会清理一波状态异常的容器, 同时也会清理探针.
 func (m *manager) CleanupPods(desiredPods map[types.UID]sets.Empty) {
 	m.workerLock.RLock()
 	defer m.workerLock.RUnlock()
-
 	for key, worker := range m.workers {
+		//注意这里是!ok，所以不在desiredPods里面的会被stop
 		if _, ok := desiredPods[key.podUID]; !ok {
 			worker.stop()
 		}
 	}
 }
 
+// 这里是Container是否started，而不是Pod！！！！
 func (m *manager) isContainerStarted(pod *v1.Pod, containerStatus *v1.ContainerStatus) bool {
 	if containerStatus.State.Running == nil {
 		return false
@@ -287,6 +294,7 @@ func (m *manager) isContainerStarted(pod *v1.Pod, containerStatus *v1.ContainerS
 }
 
 func (m *manager) UpdatePodStatus(pod *v1.Pod, podStatus *v1.PodStatus) {
+	//更新container的started和ready状态
 	for i, c := range podStatus.ContainerStatuses {
 		started := m.isContainerStarted(pod, &podStatus.ContainerStatuses[i])
 		podStatus.ContainerStatuses[i].Started = &started
@@ -315,7 +323,7 @@ func (m *manager) UpdatePodStatus(pod *v1.Pod, podStatus *v1.PodStatus) {
 		}
 		podStatus.ContainerStatuses[i].Ready = ready
 	}
-
+	//initContainer在用完会被删除吗
 	for i, c := range podStatus.InitContainerStatuses {
 		started := m.isContainerStarted(pod, &podStatus.InitContainerStatuses[i])
 		podStatus.InitContainerStatuses[i].Started = &started

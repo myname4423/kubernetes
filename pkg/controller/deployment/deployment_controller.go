@@ -595,8 +595,9 @@ func (dc *DeploymentController) syncDeployment(ctx context.Context, key string) 
 	defer func() {
 		logger.V(4).Info("Finished syncing deployment", "deployment", klog.KRef(namespace, name), "duration", time.Since(startTime))
 	}()
-
-	deployment, err := dc.dLister.Deployments(namespace).Get(name)
+	//这个操作，其实就是在访问本地缓存的索引。
+	// 实际上，在 Kubernetes 的源码中，你会经常看到控制器从各种 Lister 里获取对象，比如：podLister、nodeLister 等等，它们使用的都是 Informer 和缓存机制。
+	deployment, err := dc.dLister.Deployments(namespace).Get(name) //这里的其实是期望状态
 	if errors.IsNotFound(err) {
 		logger.V(2).Info("Deployment has been deleted", "deployment", klog.KRef(namespace, name))
 		return nil
@@ -662,14 +663,14 @@ func (dc *DeploymentController) syncDeployment(ctx context.Context, key string) 
 		return err
 	}
 	if scalingEvent {
-		return dc.sync(ctx, d, rsList)
+		return dc.sync(ctx, d, rsList) //这个负责scaling
 	}
 
 	switch d.Spec.Strategy.Type {
 	case apps.RecreateDeploymentStrategyType:
 		return dc.rolloutRecreate(ctx, d, rsList, podMap)
 	case apps.RollingUpdateDeploymentStrategyType:
-		return dc.rolloutRolling(ctx, d, rsList)
+		return dc.rolloutRolling(ctx, d, rsList) //这个负责滚动更新，d是期望状态；而从d直接拿到的rsList是实际状态
 	}
 	return fmt.Errorf("unexpected deployment strategy type: %s", d.Spec.Strategy.Type)
 }

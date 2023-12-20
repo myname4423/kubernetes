@@ -67,7 +67,7 @@ func (dc *DeploymentController) rolloutRolling(ctx context.Context, d *apps.Depl
 }
 
 func (dc *DeploymentController) reconcileNewReplicaSet(ctx context.Context, allRSs []*apps.ReplicaSet, newRS *apps.ReplicaSet, deployment *apps.Deployment) (bool, error) {
-	if *(newRS.Spec.Replicas) == *(deployment.Spec.Replicas) {
+	if *(newRS.Spec.Replicas) == *(deployment.Spec.Replicas) { //注意无论哪个rs都得扩容到和deployment相同的replicas
 		// Scaling not required.
 		return false, nil
 	}

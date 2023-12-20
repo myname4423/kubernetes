@@ -133,6 +133,8 @@ func (pb *prober) runProbeWithRetries(ctx context.Context, probeType probeType, 
 	return result, output, err
 }
 
+// p *v1.Probe可能是container.ReadinessProbe container.LivenessProbe container.StartupProbe中的一种
+// 3个if都有return，说明一个probe只可能是exec http tcp grpc的一种
 func (pb *prober) runProbe(ctx context.Context, probeType probeType, p *v1.Probe, pod *v1.Pod, status v1.PodStatus, container v1.Container, containerID kubecontainer.ContainerID) (probe.Result, string, error) {
 	timeout := time.Duration(p.TimeoutSeconds) * time.Second
 	if p.Exec != nil {
